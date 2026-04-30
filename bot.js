@@ -1,15 +1,11 @@
-import { App } from "@slack/bolt";
+import {App} from "@slack/bolt";
 import OpenAI from "openai";
-import * as dotenv from "dotenv";
-dotenv.config();
 
 const client = new OpenAI({
   apiKey: process.env.HACKCLUB_API_KEY,
   baseURL: "https://ai.hackclub.com/proxy/v1",
 });
 
-
-// Initializes your app with your Slack app and bot token
 const app = new App({
   token: process.env.SLACK_BOT_TOKEN,
   socketMode: true,
@@ -17,7 +13,6 @@ const app = new App({
 });
 
 const channel_name = "pre-ask";
-let context = [];
 
 const faq = `Hack Club: The Game FAQ:
 
@@ -56,46 +51,18 @@ A: It may take anywhere from three days to two weeks to review your project. Ple
 
 Q: What happens after I hit 40 hours?
 A: After you hit 40 hours, your projects will be reviewed after you ship them. Projects are also reviewed on a rolling basis if you ship before hitting 40 hours. We may deduct hours or disqualify projects for being low-quality or fraudulent.`;
-(async () => {
-  await app.start();
-  console.log("okie lemme start. HISTORY!!! LOADIFY");
-  context = await loadHistory("C08QJV4B8UT"); //C08QJV4B8UT = id for pre-ask channel
-  console.log(`AHA! I DONE! ${context.length} MESSAGES LOADED. LES DO DIS`);
-})();
 
-async function loadHistory(cid) {
-  const messages = [];
-  let cursor;
-  do {
-    const res = await app.client.conversations.history({
-        channel: cid,
-        limit: 200,
-         cursor,
-    });
-
-    messages.push(...res.messages);
-    cursor = res.response_metadata?.next_cursor;
-  } 
-  
-  
-  while (cursor);
-
-  return messages
-    .reverse()
-    .filter((m) => m.subtype !== "bot_message" && m.text)
-    .map((m) => m.text);
-}
 
 app.message(async ({ message, say }) => {
     if (message.subtype === "bot_message" || !message.text) return;
     if (message.thread_ts && message.thread_ts !== message.ts) return;
 
   const response = await client.chat.completions.create({
-    model: "qwen/qwen3-32b",
+    model: "google/gemini-embedding-2-preview",
     messages: [
       {
         role: "system",
-        content: `You are a helpful assistant for #${channel_name}. You have two sources of context: a FAQ and the channel history. Use both to answer questions.\n\nFAQ:\n${faq}\n\nCHANNEL HISTORY:\n${context.join("\n")}\n\nRules:\n- If a question is covered by the FAQ, answer it using the FAQ.\n- If a question has been asked and answered before in the channel history, answer it.\n- If the question is brand new and not covered by either, return exactly: N/A. Keep answers consise. Do not use any form of formatting (bold, bullet points, etc). Do not mention where you got the answer, just say the answer`,
+        content: `You are a helpful assistant for #${channel_name}. You have one source of context: a FAQ. Use it to answer questions.\n\nFAQ:\n${faq}\n\nRules:\n- If a question is covered by the FAQ, answer it using the FAQ. Use the exact works from the FAQ without editing it in anyway. Do not use any form of formatting (bold, bullet points, etc). Do not mention where you got the answer, just say the answer. If the answer is not explictly answered in the FAQ, just respond with N/A.`,
       },
       { role: "user", content: message.text },
     ],
@@ -109,7 +76,7 @@ app.message(async ({ message, say }) => {
     }
   else {
     context.push(message.text)
-    await say({ text: answer, thread_ts: message.ts });
+    await say({text: answer, thread_ts: message.ts});
   }
 });
 
