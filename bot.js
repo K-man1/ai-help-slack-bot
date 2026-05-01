@@ -1,18 +1,38 @@
+import dotenv from "dotenv";
 import {App} from "@slack/bolt";
-import OpenAI from "openai";
 
-const client = new OpenAI({
-  apiKey: process.env.HACKCLUB_API_KEY,
-  baseURL: "https://ai.hackclub.com/proxy/v1",
-});
+dotenv.config();
+
+const callOpenRouter = async (messages) => {
+  const response = await fetch("https://ai.hackclub.com/proxy/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${process.env.HACKCLUB_API_KEY.trim()}`,
+      "HTTP-Referer": "http://localhost",
+      "X-Title": "hctg-help-bot",
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model: "qwen/qwen3-32b",
+      messages: messages,
+      max_tokens: 1024
+    })
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`API error: ${response.status} ${response.statusText} — ${body}`);
+  }
+
+  const data = await response.json();
+  return data.choices[0].message.content;
+};
 
 const app = new App({
   token: process.env.SLACK_BOT_TOKEN,
   socketMode: true,
   appToken: process.env.SLACK_APP_TOKEN,
 });
-
-const channel_name = "pre-ask";
 
 const faq = `Hack Club: The Game FAQ:
 
@@ -29,7 +49,7 @@ Q: How will the IRL event work?
 A: We don't want to spoil too many details, but it'll be a scavenger hunt.
 
 Q: Will accommodations, food, and game costs be covered?
-A: Yep! All living expenses, food, and game costs will be covered during the event. You'll be sleeping at our venues during the night, and be out in Manhattan during the day. We'll have pre and post event stays in our shop if you need them.
+A: Yep! All living expenses, food, and game costs will be covered during the event. You'll be sleeping at our venues during the night, and be out in Manhattan during the day. We'll have 1 and post event stays in our shop if you need them.
 
 Q: Are there travel stipends?
 A: Yes! Every additional hour worked after you hit 40 hours and qualify can be used towards a travel stipend at the rate of $8/h. You'll also be able to purchase pre/post event accommodation if you need it in the shop.
@@ -57,13 +77,10 @@ app.message(async ({ message, say }) => {
     if (message.subtype === "bot_message" || !message.text) return;
     if (message.thread_ts && message.thread_ts !== message.ts) return;
 
-  const response = await client.chat.completions.create({
-    model: "google/gemini-embedding-2-preview",
-    messages: [
-      {
-        role: "system",
-        content: `
-        You are a bot for #hctg-help. You only use the FAQ below as your entire knowledge source.
+  const answer = await callOpenRouter([
+    {
+      role: "system",
+      content: `You are a bot for #hctg-help. You only use the FAQ below as your entire knowledge source.
 
 FAQ:
 ${faq}
@@ -71,28 +88,22 @@ ${faq}
 Rules:
 - Only answer if the user’s question is explicitly and directly answered in the FAQ.
 - Your response must be a verbatim copy of the exact answer text from the FAQ.
-- Do not rephrase, summarize, combine, or modify any words.
+- Do not rephrase, summarize, combine, or modify any words (and do not include A: in responses, just the answer).
 - Do not add punctuation, formatting, or extra text.
 - Do not use outside knowledge, reasoning, or calculations.
 - If the question is even slightly unrelated, unclear, or not directly covered, respond exactly with: N/A
 - Any math, general knowledge, or off-topic question must return: N/A
-- If multiple FAQ entries could match, return the single most directly relevant answer exactly as written.
-        
-        `,
-      },
-      { role: "user", content: message.text },
-    ],
-    max_tokens: 1024,
-  });
-
-  const answer = response.choices[0].message.content;
+- If multiple FAQ entries could match, return the single most directly relevant answer exactly as written.`
+    },
+    { role: "user", content: message.text }
+  ]);
   
   if (answer == "N/A"){
     console.log("see they asked a question, but im better so no response.")
     }
   else {
-    context.push(message.text)
     await say({text: answer, thread_ts: message.ts});
   }
 });
 
+app.start(process.env.PORT || 3000);
